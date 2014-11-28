@@ -167,7 +167,7 @@
           IQueryable<T> query = session.Query<T, TIndex>().Customize(x =>
           {
             if (_consistentQueries)
-              x.WaitForNonStaleResults();
+              x.WaitForNonStaleResultsAsOfLastWrite();
           })
           .Statistics(out stats)
           .Where(where);
@@ -266,7 +266,7 @@
       Func<Type, string> getTagCondition = t => "Tag:" + session.Advanced.DocumentStore.Conventions.GetTypeTagName(t);
       var query = new IndexQuery { Query = String.Format("({0} OR {1} OR {2})", getTagCondition(typeof(RavenCommit)), getTagCondition(typeof(RavenSnapshot)), getTagCondition(typeof(RavenStreamHead))) };
       while (HasDocs(EventStoreDocumentsByEntityName.IndexNameValue, query))
-          session.Advanced.DocumentStore.DatabaseCommands.DeleteByIndex(EventStoreDocumentsByEntityName.IndexNameValue, query, true);
+          session.Advanced.DocumentStore.DatabaseCommands.DeleteByIndex(EventStoreDocumentsByEntityName.IndexNameValue, query, new BulkOperationOptions { AllowStale = true });
     }
 
     private void PurgeBucket(IDocumentSession session, string bucketId)
@@ -275,7 +275,7 @@
       Func<Type, string> getTagCondition = t => "Tag:" + session.Advanced.DocumentStore.Conventions.GetTypeTagName(t);
       var query = new IndexQuery { Query = String.Format("({0} OR {1} OR {2}) AND (BucketId: {3})", getTagCondition(typeof(RavenCommit)), getTagCondition(typeof(RavenSnapshot)), getTagCondition(typeof(RavenStreamHead)), bucketId) };
       while (HasDocs(EventStoreDocumentsByEntityName.IndexNameValue, query))
-          session.Advanced.DocumentStore.DatabaseCommands.DeleteByIndex(EventStoreDocumentsByEntityName.IndexNameValue, query, true);
+          session.Advanced.DocumentStore.DatabaseCommands.DeleteByIndex(EventStoreDocumentsByEntityName.IndexNameValue, query, new BulkOperationOptions { AllowStale = true });
     }
 
     public virtual void Purge()
@@ -337,7 +337,7 @@
       Func<Type, string> getTagCondition = t => "Tag:" + session.Advanced.DocumentStore.Conventions.GetTypeTagName(t);
       var query = new IndexQuery { Query = String.Format("({0} OR {1} OR {2}) AND BucketId: {3} AND StreamId: {4}", getTagCondition(typeof(RavenCommit)), getTagCondition(typeof(RavenSnapshot)), getTagCondition(typeof(RavenStreamHead)), bucketId, streamId) };
       while (HasDocs(EventStoreDocumentsByEntityName.IndexNameValue, query))
-          session.Advanced.DocumentStore.DatabaseCommands.DeleteByIndex(EventStoreDocumentsByEntityName.IndexNameValue, query, true);
+          session.Advanced.DocumentStore.DatabaseCommands.DeleteByIndex(EventStoreDocumentsByEntityName.IndexNameValue, query, new BulkOperationOptions { AllowStale = true });
     }
 
     public virtual IEnumerable<ICommit> GetFrom(string checkpointToken)
