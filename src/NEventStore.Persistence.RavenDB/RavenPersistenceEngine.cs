@@ -23,11 +23,12 @@
     private static readonly ILog Logger = LogFactory.BuildLogger(typeof(RavenPersistenceEngine));
     private readonly TransactionScopeOption _scopeOption;
     private readonly bool _consistentQueries;
+    private readonly TimeSpan? _consistencyTimeout;    
     private readonly int _pageSize;
     private readonly IDocumentStore _store;
     private readonly IDocumentSerializer _serializer;
 
-    public RavenPersistenceEngine(IDocumentStore store, IDocumentSerializer serializer, RavenPersistenceOptions options)
+      public RavenPersistenceEngine(IDocumentStore store, IDocumentSerializer serializer, RavenPersistenceOptions options)
     {
       if (store == null)
         throw new ArgumentNullException("store");
@@ -38,6 +39,7 @@
       _store = store;
       _serializer = serializer;
       _consistentQueries = options.ConsistentQueries;
+      _consistencyTimeout = options.ConsistencyTimeout;
       _pageSize = options.PageSize;
       _scopeOption = options.ScopeOption;
     }
@@ -166,8 +168,12 @@
         {
           IQueryable<T> query = session.Query<T, TIndex>().Customize(x =>
           {
-            if (_consistentQueries)
-              x.WaitForNonStaleResultsAsOfLastWrite();
+              if (!_consistentQueries) return;
+              
+              if(_consistencyTimeout.HasValue)
+                  x.WaitForNonStaleResults(_consistencyTimeout.Value);
+              else
+                  x.WaitForNonStaleResults();
           })
           .Statistics(out stats)
           .Where(where);
@@ -210,10 +216,16 @@
       Logger.Debug(Messages.GettingAllCommitsFrom, start, bucketId);
       return QueryCommits<RavenCommitByDate>(x => x.BucketId == bucketId && x.CommitStamp >= start, x => x.CommitStamp);
     }
+    public IEnumerable<ICommit> GetFrom(string bucketId, string checkpointToken)
+    {
+      var intCheckpoint = LongCheckpoint.Parse(checkpointToken);
+      Logger.Debug(Messages.GettingAllCommitsFromBucketAndCheckpoint, bucketId, intCheckpoint.Value);
+      return QueryCommits<RavenCommitByCheckpoint>(x => x.BucketId == bucketId && x.CheckpointNumber > intCheckpoint.LongValue, x => x.CheckpointNumber);
+    }
 
     public ICheckpoint GetCheckpoint(string checkpointToken)
     {
-      return string.IsNullOrWhiteSpace(checkpointToken) ? null : LongCheckpoint.Parse(checkpointToken);
+      return LongCheckpoint.Parse(checkpointToken);
     }
 
     public virtual IEnumerable<ICommit> GetFromTo(string bucketId, DateTime start, DateTime end)
@@ -266,7 +278,8 @@
       Func<Type, string> getTagCondition = t => "Tag:" + session.Advanced.DocumentStore.Conventions.GetTypeTagName(t);
       var query = new IndexQuery { Query = String.Format("({0} OR {1} OR {2})", getTagCondition(typeof(RavenCommit)), getTagCondition(typeof(RavenSnapshot)), getTagCondition(typeof(RavenStreamHead))) };
       while (HasDocs(EventStoreDocumentsByEntityName.IndexNameValue, query))
-          session.Advanced.DocumentStore.DatabaseCommands.DeleteByIndex(EventStoreDocumentsByEntityName.IndexNameValue, query, new BulkOperationOptions { AllowStale = true });
+        session.Advanced.DocumentStore.DatabaseCommands.DeleteByIndex(EventStoreDocumentsByEntityName.IndexNameValue, query, 
+            new BulkOperationOptions { AllowStale = true });
     }
 
     private void PurgeBucket(IDocumentSession session, string bucketId)
@@ -275,7 +288,8 @@
       Func<Type, string> getTagCondition = t => "Tag:" + session.Advanced.DocumentStore.Conventions.GetTypeTagName(t);
       var query = new IndexQuery { Query = String.Format("({0} OR {1} OR {2}) AND (BucketId: {3})", getTagCondition(typeof(RavenCommit)), getTagCondition(typeof(RavenSnapshot)), getTagCondition(typeof(RavenStreamHead)), bucketId) };
       while (HasDocs(EventStoreDocumentsByEntityName.IndexNameValue, query))
-          session.Advanced.DocumentStore.DatabaseCommands.DeleteByIndex(EventStoreDocumentsByEntityName.IndexNameValue, query, new BulkOperationOptions { AllowStale = true });
+          session.Advanced.DocumentStore.DatabaseCommands.DeleteByIndex(EventStoreDocumentsByEntityName.IndexNameValue, query, 
+              new BulkOperationOptions { AllowStale = true });
     }
 
     public virtual void Purge()
@@ -337,7 +351,8 @@
       Func<Type, string> getTagCondition = t => "Tag:" + session.Advanced.DocumentStore.Conventions.GetTypeTagName(t);
       var query = new IndexQuery { Query = String.Format("({0} OR {1} OR {2}) AND BucketId: {3} AND StreamId: {4}", getTagCondition(typeof(RavenCommit)), getTagCondition(typeof(RavenSnapshot)), getTagCondition(typeof(RavenStreamHead)), bucketId, streamId) };
       while (HasDocs(EventStoreDocumentsByEntityName.IndexNameValue, query))
-          session.Advanced.DocumentStore.DatabaseCommands.DeleteByIndex(EventStoreDocumentsByEntityName.IndexNameValue, query, new BulkOperationOptions { AllowStale = true });
+          session.Advanced.DocumentStore.DatabaseCommands.DeleteByIndex(EventStoreDocumentsByEntityName.IndexNameValue, query, 
+              new BulkOperationOptions { AllowStale = true });
     }
 
     public virtual IEnumerable<ICommit> GetFrom(string checkpointToken)
@@ -474,6 +489,5 @@
     {
       return OpenCommandScope() ?? new TransactionScope(TransactionScopeOption.Suppress);
     }
-
   }
 }
